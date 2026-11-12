@@ -36,6 +36,7 @@ export async function POST(request: NextRequest) {
           bedrag: inv.bedrag,
           factuurnummer: inv.factuurnummer,
           patient: inv.patient,
+          taal: inv.taal,
         });
         await sendInvoiceEmail({
           to: inv.email,

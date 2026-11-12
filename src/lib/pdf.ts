@@ -129,6 +129,7 @@ export type PaymentInfo = {
   bedrag: string;
   factuurnummer: string;
   patient: string;
+  taal?: "NL" | "FR";
 };
 
 function parseAmountToNumber(str: string): number | null {
@@ -162,15 +163,20 @@ function buildEpcQrPayload(opts: { iban: string; name: string; amount: number | 
   return lines.join("\n");
 }
 
+const QR_CAPTIONS: Record<"NL" | "FR", { title: string; subtitle: string }> = {
+  NL: { title: "Betaal deze factuur via QR-code", subtitle: "Scan met de betaalapp van uw bank" },
+  FR: { title: "Payez cette facture via QR code", subtitle: "Scannez avec l'application de votre banque" },
+};
+
 /**
- * Tekent een kleine betaal-QR-code rechtstreeks op de (eerste) factuurpagina
- * zelf, rechtsonderaan — enkel als PRACTICE_IBAN en PRACTICE_ACCOUNT_NAME
- * zijn ingesteld. Ontbreken die, dan wordt er niets getekend (geen fout).
+ * Tekent een betaal-QR-code gecentreerd onderaan de (eerste) factuurpagina
+ * zelf, mét duidelijke tekst erboven dat het om een betaling gaat — enkel
+ * als PRACTICE_IBAN en PRACTICE_ACCOUNT_NAME zijn ingesteld. Ontbreken die,
+ * dan wordt er niets getekend (geen fout).
  *
- * Let op: de exacte lay-out van de CareConnect-factuur is niet gekend, dus
- * dit is een "beste gok"-positie (kleine QR strak in de rechterbenedenhoek).
- * Overlapt dit met bestaande tekst op de factuur, dan passen we x/y/qrSize
- * hieronder simpelweg aan.
+ * Let op: de exacte lay-out van de CareConnect-factuur is niet gekend. Komt
+ * dit toch in de knoop met bestaande tekst op de factuur, dan passen we
+ * x/y/qrSize hieronder simpelweg aan.
  */
 async function drawPaymentQrOnPage(page: any, doc: PDFDocument, payment: PaymentInfo): Promise<void> {
   const iban = process.env.PRACTICE_IBAN;
@@ -181,17 +187,29 @@ async function drawPaymentQrOnPage(page: any, doc: PDFDocument, payment: Payment
   const remittance = `Factuur ${payment.factuurnummer} - ${payment.patient}`;
   const qrPayload = buildEpcQrPayload({ iban, name: accountName, amount, remittance });
 
-  const qrPngBuffer = await QRCode.toBuffer(qrPayload, { type: "png", width: 300, margin: 1 });
+  const qrPngBuffer = await QRCode.toBuffer(qrPayload, { type: "png", width: 400, margin: 1 });
   const qrImage = await doc.embedPng(qrPngBuffer);
   const font = await doc.embedFont(StandardFonts.Helvetica);
+  const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
 
   const { width } = page.getSize();
-  const qrSize = 80;
-  const margin = 28;
-  const qrX = width - margin - qrSize;
+  const CM = 28.3465; // 1 cm in PDF-punten
+  const qrSize = 4 * CM;
+  const margin = 32;
+
+  const qrX = (width - qrSize) / 2;
   const qrY = margin;
 
-  page.drawText("Scan om te betalen", { x: qrX - 8, y: qrY + qrSize + 4, size: 7, font });
+  const { title, subtitle } = QR_CAPTIONS[payment.taal ?? "FR"];
+
+  const titleSize = 13;
+  const titleWidth = fontBold.widthOfTextAtSize(title, titleSize);
+  page.drawText(title, { x: (width - titleWidth) / 2, y: qrY + qrSize + 22, size: titleSize, font: fontBold });
+
+  const subtitleSize = 9;
+  const subtitleWidth = font.widthOfTextAtSize(subtitle, subtitleSize);
+  page.drawText(subtitle, { x: (width - subtitleWidth) / 2, y: qrY + qrSize + 6, size: subtitleSize, font });
+
   page.drawImage(qrImage, { x: qrX, y: qrY, width: qrSize, height: qrSize });
 }
 

@@ -121,6 +121,7 @@ export default function RunUploader() {
       formData.append("factuurnummer", inv.factuurnummer);
       formData.append("patient", inv.patient);
       formData.append("bedrag", inv.bedrag);
+      formData.append("taal", inv.taal);
       const res = await fetch("/api/extract-pdf", { method: "POST", body: formData });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data) {

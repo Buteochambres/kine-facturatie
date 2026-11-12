@@ -118,13 +118,21 @@ export default function RunUploader() {
       const formData = new FormData();
       formData.append("file", file);
       formData.append("pages", JSON.stringify(inv.pages));
-      formData.append("factuurnummer", inv.factuurnummer);
       const res = await fetch("/api/extract-pdf", { method: "POST", body: formData });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error ?? "Fout bij openen PDF.");
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data) {
+        throw new Error(data?.error ?? `Fout bij openen PDF (status ${res.status}).`);
       }
-      const blob = await res.blob();
+      if (!data.pdfBase64) {
+        throw new Error("Geen PDF-data ontvangen.");
+      }
+
+      const byteChars = atob(data.pdfBase64);
+      const byteNumbers = new Array(byteChars.length);
+      for (let i = 0; i < byteChars.length; i++) {
+        byteNumbers[i] = byteChars.charCodeAt(i);
+      }
+      const blob = new Blob([new Uint8Array(byteNumbers)], { type: "application/pdf" });
       const url = URL.createObjectURL(blob);
       if (newWindow) {
         newWindow.location.href = url;

@@ -5,14 +5,14 @@ export const runtime = "nodejs";
 export const maxDuration = 30;
 
 // Haalt enkel de opgegeven pagina's van de geüploade verzamel-PDF op, als
-// losse PDF — gebruikt om een factuur te kunnen bekijken/afdrukken zonder
-// 'm te versturen.
+// losse PDF (als base64 in JSON, i.p.v. een ruwe binaire respons — dat bleek
+// op Vercel tot een onduidelijke serverfout te leiden). Gebruikt om een
+// factuur te kunnen bekijken/afdrukken zonder 'm te versturen.
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
     const file = formData.get("file");
     const pagesRaw = formData.get("pages");
-    const factuurnummer = formData.get("factuurnummer");
 
     if (!file || typeof file === "string") {
       return NextResponse.json({ error: "Geen bestand ontvangen." }, { status: 400 });
@@ -25,20 +25,11 @@ export async function POST(request: NextRequest) {
     const arrayBuffer = await file.arrayBuffer();
     const originalBytes = new Uint8Array(arrayBuffer);
     const pdfBytes = await extractPagesAsPdf(originalBytes, pages);
+    const pdfBase64 = Buffer.from(pdfBytes).toString("base64");
 
-    const safeName =
-      typeof factuurnummer === "string" && factuurnummer
-        ? factuurnummer.replace(/[^a-zA-Z0-9_-]/g, "_")
-        : "factuur";
-
-    return new NextResponse(Buffer.from(pdfBytes), {
-      status: 200,
-      headers: {
-        "Content-Type": "application/pdf",
-        "Content-Disposition": `inline; filename="factuur-${safeName}.pdf"`,
-      },
-    });
+    return NextResponse.json({ pdfBase64 });
   } catch (err: any) {
+    console.error("extract-pdf error:", err);
     return NextResponse.json({ error: err.message ?? "Fout bij genereren PDF." }, { status: 500 });
   }
 }

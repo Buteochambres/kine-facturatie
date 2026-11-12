@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import RunUploader from "@/components/RunUploader";
 import PatientTable from "@/components/PatientTable";
+import SentInvoicesHistory from "@/components/SentInvoicesHistory";
 
 export default function HomePage() {
   const router = useRouter();
@@ -22,6 +23,7 @@ export default function HomePage() {
 
       <RunUploader />
       <PatientTable />
+      <SentInvoicesHistory />
     </div>
   );
 }

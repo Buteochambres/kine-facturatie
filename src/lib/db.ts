@@ -68,6 +68,28 @@ export async function findPatientByName(naam: string): Promise<Patient | null> {
   return rows[0] ?? null;
 }
 
+export type SentInvoiceLogEntry = {
+  id: number;
+  factuurnummer: string;
+  patient: string;
+  email: string;
+  bedrag: string | null;
+  taal: string | null;
+  status: "sent" | "failed";
+  error: string | null;
+  sent_at: string;
+};
+
+export async function listSentInvoices(limit = 300): Promise<SentInvoiceLogEntry[]> {
+  const pool = getPool();
+  const { rows } = await pool.query<SentInvoiceLogEntry>(
+    `SELECT id, factuurnummer, patient, email, bedrag, taal, status, error, sent_at
+     FROM sent_invoices ORDER BY sent_at DESC LIMIT $1`,
+    [limit]
+  );
+  return rows;
+}
+
 export async function logSentInvoice(entry: {
   factuurnummer: string;
   patient: string;

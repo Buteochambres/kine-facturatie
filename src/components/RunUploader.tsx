@@ -11,6 +11,51 @@ type SendResult = {
   error?: string;
 };
 
+function parseAmount(str: string): number | null {
+  if (!str) return null;
+  const normalized = str.replace(/\./g, "").replace(",", ".");
+  const n = parseFloat(normalized);
+  return Number.isFinite(n) ? n : null;
+}
+
+function formatAmount(n: number): string {
+  return n.toFixed(2).replace(".", ",");
+}
+
+/**
+ * Groepeert facturen met exact dezelfde patiëntnaam samen tot één factuur:
+ * pagina's worden samengevoegd (dus één PDF-bijlage, één e-mail), bedragen
+ * worden opgeteld (indien numeriek interpreteerbaar) en factuurnummers/data
+ * worden samengevoegd ter info.
+ */
+function mergeBySamePatient(list: PreviewInvoice[]): PreviewInvoice[] {
+  const groups = new Map<string, PreviewInvoice[]>();
+  for (const inv of list) {
+    const key = inv.patient.trim().toLowerCase();
+    const arr = groups.get(key) ?? [];
+    arr.push(inv);
+    groups.set(key, arr);
+  }
+
+  const result: PreviewInvoice[] = [];
+  for (const group of groups.values()) {
+    if (group.length === 1) {
+      result.push(group[0]);
+      continue;
+    }
+    const pages = group.flatMap((g) => g.pages).sort((a, b) => a - b);
+    const factuurnummer = group.map((g) => g.factuurnummer).join(" + ");
+    const datum = Array.from(new Set(group.map((g) => g.datum).filter(Boolean))).join(", ");
+    const amounts = group.map((g) => parseAmount(g.bedrag));
+    const bedrag = amounts.every((a) => a !== null)
+      ? formatAmount(amounts.reduce((sum, a) => sum! + a!, 0))
+      : group.map((g) => g.bedrag).filter(Boolean).join(" + ");
+
+    result.push({ ...group[0], factuurnummer, pages, datum, bedrag });
+  }
+  return result;
+}
+
 export default function RunUploader() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -50,6 +95,27 @@ export default function RunUploader() {
       return next;
     });
   }
+
+  function removeInvoice(index: number) {
+    setInvoices((prev) => {
+      if (!prev) return prev;
+      return prev.filter((_, i) => i !== index);
+    });
+  }
+
+  function mergeSamePatient() {
+    setInvoices((prev) => (prev ? mergeBySamePatient(prev) : prev));
+  }
+
+  const duplicatePatientCount = (() => {
+    if (!invoices) return 0;
+    const counts = new Map<string, number>();
+    for (const inv of invoices) {
+      const key = inv.patient.trim().toLowerCase();
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return Array.from(counts.values()).filter((c) => c > 1).length;
+  })();
 
   async function sendAll() {
     if (!file || !invoices) return;
@@ -109,6 +175,7 @@ export default function RunUploader() {
                 <th>E-mail</th>
                 <th>Taal</th>
                 <th>Bron</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -139,6 +206,11 @@ export default function RunUploader() {
                       <span className="badge err">ontbreekt</span>
                     )}
                   </td>
+                  <td>
+                    <button className="danger" onClick={() => removeInvoice(idx)} disabled={sending}>
+                      Verwijder
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -151,9 +223,20 @@ export default function RunUploader() {
             </p>
           )}
 
+          {duplicatePatientCount > 0 && (
+            <p className="muted">
+              {duplicatePatientCount} patiënt{duplicatePatientCount === 1 ? "" : "en"} met meerdere facturen in deze
+              batch. Klik op "Samenvoegen per patiënt" om die te bundelen tot één e-mail met één PDF-bijlage per
+              patiënt (bedragen worden opgeteld).
+            </p>
+          )}
+
           <div className="row" style={{ marginTop: 16 }}>
             <button className="primary" onClick={sendAll} disabled={sending}>
               {sending ? "Bezig met versturen..." : `Verstuur ${invoices.length} facturen`}
+            </button>
+            <button onClick={mergeSamePatient} disabled={sending || duplicatePatientCount === 0}>
+              Samenvoegen per patiënt
             </button>
             <button onClick={reset} disabled={sending}>
               Annuleren

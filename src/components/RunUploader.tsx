@@ -133,8 +133,14 @@ export default function RunUploader() {
       }
       setTimeout(() => URL.revokeObjectURL(url), 60000);
     } catch (err: any) {
-      newWindow?.close();
       setError(err.message);
+      // Toon de fout ook in het geopende venster zelf i.p.v. het stilletjes te
+      // sluiten, anders lijkt het alsof er niets gebeurt.
+      if (newWindow) {
+        newWindow.document.write(
+          `<pre style="font-family: -apple-system, sans-serif; padding: 20px; white-space: pre-wrap;">Fout bij openen van de factuur:\n\n${err.message}</pre>`
+        );
+      }
     }
   }
 

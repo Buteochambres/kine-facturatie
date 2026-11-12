@@ -107,6 +107,37 @@ export default function RunUploader() {
     setInvoices((prev) => (prev ? mergeBySamePatient(prev) : prev));
   }
 
+  async function printInvoice(inv: PreviewInvoice) {
+    if (!file) return;
+    setError(null);
+    // Open het nieuwe tabblad meteen, synchroon bij de klik — anders blokkeren
+    // sommige browsers (o.a. Safari) de pop-up omdat die pas ná de fetch zou
+    // openen.
+    const newWindow = window.open("", "_blank");
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("pages", JSON.stringify(inv.pages));
+      formData.append("factuurnummer", inv.factuurnummer);
+      const res = await fetch("/api/extract-pdf", { method: "POST", body: formData });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error ?? "Fout bij openen PDF.");
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      if (newWindow) {
+        newWindow.location.href = url;
+      } else {
+        window.location.href = url;
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (err: any) {
+      newWindow?.close();
+      setError(err.message);
+    }
+  }
+
   const duplicatePatientCount = (() => {
     if (!invoices) return 0;
     const counts = new Map<string, number>();
@@ -206,7 +237,10 @@ export default function RunUploader() {
                       <span className="badge err">ontbreekt</span>
                     )}
                   </td>
-                  <td>
+                  <td className="row">
+                    <button onClick={() => printInvoice(inv)} disabled={sending}>
+                      Afdrukken
+                    </button>
                     <button className="danger" onClick={() => removeInvoice(idx)} disabled={sending}>
                       Verwijder
                     </button>

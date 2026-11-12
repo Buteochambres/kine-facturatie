@@ -13,6 +13,9 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData();
     const file = formData.get("file");
     const pagesRaw = formData.get("pages");
+    const factuurnummer = formData.get("factuurnummer");
+    const patient = formData.get("patient");
+    const bedrag = formData.get("bedrag");
 
     if (!file || typeof file === "string") {
       return NextResponse.json({ error: "Geen bestand ontvangen." }, { status: 400 });
@@ -24,7 +27,11 @@ export async function POST(request: NextRequest) {
     const pages: number[] = JSON.parse(pagesRaw);
     const arrayBuffer = await file.arrayBuffer();
     const originalBytes = new Uint8Array(arrayBuffer);
-    const pdfBytes = await extractPagesAsPdf(originalBytes, pages);
+    const payment =
+      typeof factuurnummer === "string" && typeof patient === "string" && typeof bedrag === "string"
+        ? { factuurnummer, patient, bedrag }
+        : undefined;
+    const pdfBytes = await extractPagesAsPdf(originalBytes, pages, payment);
     const pdfBase64 = Buffer.from(pdfBytes).toString("base64");
 
     return NextResponse.json({ pdfBase64 });

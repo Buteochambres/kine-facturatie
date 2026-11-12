@@ -1,4 +1,5 @@
-import { PDFDocument } from "pdf-lib";
+import { PDFDocument, StandardFonts } from "pdf-lib";
+import QRCode from "qrcode";
 // Let op: we importeren rechtstreeks de interne lib i.p.v. het package-root
 // ("pdf-parse"), omdat pdf-parse/index.js een 'debug mode' bevat die bij het
 // inladen (afhankelijk van hoe de module gerequire't wordt) een eigen
@@ -124,14 +125,112 @@ export async function parseBulkInvoicePdf(
   });
 }
 
+export type PaymentInfo = {
+  bedrag: string;
+  factuurnummer: string;
+  patient: string;
+};
+
+function parseAmountToNumber(str: string): number | null {
+  if (!str) return null;
+  const normalized = str.replace(/\./g, "").replace(",", ".");
+  const n = parseFloat(normalized);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Bouwt de payload voor een EPC-betalings-QR-code (SEPA Credit Transfer,
+ * standaard EPC069-12) — het type QR-code dat Belgische/Europese bankapps
+ * herkennen om automatisch een overschrijving klaar te zetten.
+ */
+function buildEpcQrPayload(opts: { iban: string; name: string; amount: number | null; remittance: string }): string {
+  const iban = opts.iban.replace(/\s+/g, "").toUpperCase();
+  const amountLine = opts.amount !== null ? `EUR${opts.amount.toFixed(2)}` : "";
+  const lines = [
+    "BCD", // Service Tag
+    "002", // Versie
+    "1", // Tekenset (1 = UTF-8)
+    "SCT", // SEPA Credit Transfer
+    "", // BIC — optioneel, niet nodig binnen SEPA
+    opts.name.slice(0, 70), // Naam begunstigde
+    iban,
+    amountLine,
+    "", // Purpose code — optioneel
+    "", // Gestructureerde mededeling — niet gebruikt
+    opts.remittance.slice(0, 140), // Vrije mededeling
+  ];
+  return lines.join("\n");
+}
+
+/**
+ * Voegt een extra pagina toe aan het PDF-document met een betaal-QR-code en
+ * de bankgegevens in tekst — enkel als PRACTICE_IBAN en PRACTICE_ACCOUNT_NAME
+ * zijn ingesteld. Ontbreken die, dan wordt er niets toegevoegd (geen fout).
+ */
+async function appendPaymentPage(doc: PDFDocument, payment: PaymentInfo, pageSize: [number, number]): Promise<void> {
+  const iban = process.env.PRACTICE_IBAN;
+  const accountName = process.env.PRACTICE_ACCOUNT_NAME;
+  if (!iban || !accountName) return;
+
+  const amount = parseAmountToNumber(payment.bedrag);
+  const remittance = `Factuur ${payment.factuurnummer} - ${payment.patient}`;
+  const qrPayload = buildEpcQrPayload({ iban, name: accountName, amount, remittance });
+
+  const qrPngBuffer = await QRCode.toBuffer(qrPayload, { type: "png", width: 300, margin: 1 });
+  const qrImage = await doc.embedPng(qrPngBuffer);
+
+  const [width, height] = pageSize;
+  const page = doc.addPage([width, height]);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
+
+  let y = height - 80;
+  page.drawText("Betaal deze factuur", { x: 50, y, size: 18, font: fontBold });
+  y -= 36;
+  page.drawText("Scan de QR-code hieronder met de betaalapp van uw bank om", { x: 50, y, size: 11, font });
+  y -= 16;
+  page.drawText("deze factuur snel en correct te betalen.", { x: 50, y, size: 11, font });
+
+  const qrSize = 200;
+  const qrY = Math.max(40, y - 40 - qrSize);
+  page.drawImage(qrImage, { x: 50, y: qrY, width: qrSize, height: qrSize });
+
+  let textY = qrY + qrSize - 10;
+  const textX = 50 + qrSize + 40;
+  page.drawText("Of maak handmatig over naar:", { x: textX, y: textY, size: 11, font: fontBold });
+  textY -= 22;
+  page.drawText(`Naam: ${accountName}`, { x: textX, y: textY, size: 11, font });
+  textY -= 18;
+  page.drawText(`IBAN: ${iban.replace(/\s+/g, "").toUpperCase()}`, { x: textX, y: textY, size: 11, font });
+  textY -= 18;
+  if (amount !== null) {
+    page.drawText(`Bedrag: €${amount.toFixed(2).replace(".", ",")}`, { x: textX, y: textY, size: 11, font });
+    textY -= 18;
+  }
+  page.drawText(`Mededeling: ${remittance}`, { x: textX, y: textY, size: 11, font });
+}
+
 /**
  * Bouw een nieuw PDF-bestand met enkel de opgegeven pagina's van het
- * originele bulk-bestand (0-indexed).
+ * originele bulk-bestand (0-indexed). Als `payment` is meegegeven én
+ * PRACTICE_IBAN/PRACTICE_ACCOUNT_NAME zijn ingesteld, wordt er een extra
+ * betaalpagina met QR-code achteraan toegevoegd.
  */
-export async function extractPagesAsPdf(originalBytes: Uint8Array, pageIndices: number[]): Promise<Uint8Array> {
+export async function extractPagesAsPdf(
+  originalBytes: Uint8Array,
+  pageIndices: number[],
+  payment?: PaymentInfo
+): Promise<Uint8Array> {
   const src = await PDFDocument.load(originalBytes);
   const out = await PDFDocument.create();
   const copied = await out.copyPages(src, pageIndices);
   copied.forEach((p) => out.addPage(p));
+
+  if (payment) {
+    const first = out.getPages()[0];
+    const size: [number, number] = first ? [first.getWidth(), first.getHeight()] : [595.28, 841.89];
+    await appendPaymentPage(out, payment, size);
+  }
+
   return out.save();
 }

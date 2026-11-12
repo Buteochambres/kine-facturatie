@@ -32,7 +32,11 @@ export async function POST(request: NextRequest) {
         continue;
       }
       try {
-        const pdfBytes = await extractPagesAsPdf(originalBytes, inv.pages);
+        const pdfBytes = await extractPagesAsPdf(originalBytes, inv.pages, {
+          bedrag: inv.bedrag,
+          factuurnummer: inv.factuurnummer,
+          patient: inv.patient,
+        });
         await sendInvoiceEmail({
           to: inv.email,
           taal: inv.taal,

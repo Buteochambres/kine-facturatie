@@ -118,6 +118,9 @@ export default function RunUploader() {
       const formData = new FormData();
       formData.append("file", file);
       formData.append("pages", JSON.stringify(inv.pages));
+      formData.append("factuurnummer", inv.factuurnummer);
+      formData.append("patient", inv.patient);
+      formData.append("bedrag", inv.bedrag);
       const res = await fetch("/api/extract-pdf", { method: "POST", body: formData });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data) {

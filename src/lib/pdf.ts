@@ -163,11 +163,16 @@ function buildEpcQrPayload(opts: { iban: string; name: string; amount: number | 
 }
 
 /**
- * Voegt een extra pagina toe aan het PDF-document met een betaal-QR-code en
- * de bankgegevens in tekst — enkel als PRACTICE_IBAN en PRACTICE_ACCOUNT_NAME
- * zijn ingesteld. Ontbreken die, dan wordt er niets toegevoegd (geen fout).
+ * Tekent een kleine betaal-QR-code rechtstreeks op de (eerste) factuurpagina
+ * zelf, rechtsonderaan — enkel als PRACTICE_IBAN en PRACTICE_ACCOUNT_NAME
+ * zijn ingesteld. Ontbreken die, dan wordt er niets getekend (geen fout).
+ *
+ * Let op: de exacte lay-out van de CareConnect-factuur is niet gekend, dus
+ * dit is een "beste gok"-positie (kleine QR strak in de rechterbenedenhoek).
+ * Overlapt dit met bestaande tekst op de factuur, dan passen we x/y/qrSize
+ * hieronder simpelweg aan.
  */
-async function appendPaymentPage(doc: PDFDocument, payment: PaymentInfo, pageSize: [number, number]): Promise<void> {
+async function drawPaymentQrOnPage(page: any, doc: PDFDocument, payment: PaymentInfo): Promise<void> {
   const iban = process.env.PRACTICE_IBAN;
   const accountName = process.env.PRACTICE_ACCOUNT_NAME;
   if (!iban || !accountName) return;
@@ -178,43 +183,23 @@ async function appendPaymentPage(doc: PDFDocument, payment: PaymentInfo, pageSiz
 
   const qrPngBuffer = await QRCode.toBuffer(qrPayload, { type: "png", width: 300, margin: 1 });
   const qrImage = await doc.embedPng(qrPngBuffer);
-
-  const [width, height] = pageSize;
-  const page = doc.addPage([width, height]);
   const font = await doc.embedFont(StandardFonts.Helvetica);
-  const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
 
-  let y = height - 80;
-  page.drawText("Betaal deze factuur", { x: 50, y, size: 18, font: fontBold });
-  y -= 36;
-  page.drawText("Scan de QR-code hieronder met de betaalapp van uw bank om", { x: 50, y, size: 11, font });
-  y -= 16;
-  page.drawText("deze factuur snel en correct te betalen.", { x: 50, y, size: 11, font });
+  const { width } = page.getSize();
+  const qrSize = 80;
+  const margin = 28;
+  const qrX = width - margin - qrSize;
+  const qrY = margin;
 
-  const qrSize = 200;
-  const qrY = Math.max(40, y - 40 - qrSize);
-  page.drawImage(qrImage, { x: 50, y: qrY, width: qrSize, height: qrSize });
-
-  let textY = qrY + qrSize - 10;
-  const textX = 50 + qrSize + 40;
-  page.drawText("Of maak handmatig over naar:", { x: textX, y: textY, size: 11, font: fontBold });
-  textY -= 22;
-  page.drawText(`Naam: ${accountName}`, { x: textX, y: textY, size: 11, font });
-  textY -= 18;
-  page.drawText(`IBAN: ${iban.replace(/\s+/g, "").toUpperCase()}`, { x: textX, y: textY, size: 11, font });
-  textY -= 18;
-  if (amount !== null) {
-    page.drawText(`Bedrag: €${amount.toFixed(2).replace(".", ",")}`, { x: textX, y: textY, size: 11, font });
-    textY -= 18;
-  }
-  page.drawText(`Mededeling: ${remittance}`, { x: textX, y: textY, size: 11, font });
+  page.drawText("Scan om te betalen", { x: qrX - 8, y: qrY + qrSize + 4, size: 7, font });
+  page.drawImage(qrImage, { x: qrX, y: qrY, width: qrSize, height: qrSize });
 }
 
 /**
  * Bouw een nieuw PDF-bestand met enkel de opgegeven pagina's van het
  * originele bulk-bestand (0-indexed). Als `payment` is meegegeven én
- * PRACTICE_IBAN/PRACTICE_ACCOUNT_NAME zijn ingesteld, wordt er een extra
- * betaalpagina met QR-code achteraan toegevoegd.
+ * PRACTICE_IBAN/PRACTICE_ACCOUNT_NAME zijn ingesteld, wordt er een kleine
+ * betaal-QR-code rechtsonderaan op de eerste pagina getekend.
  */
 export async function extractPagesAsPdf(
   originalBytes: Uint8Array,
@@ -226,10 +211,8 @@ export async function extractPagesAsPdf(
   const copied = await out.copyPages(src, pageIndices);
   copied.forEach((p) => out.addPage(p));
 
-  if (payment) {
-    const first = out.getPages()[0];
-    const size: [number, number] = first ? [first.getWidth(), first.getHeight()] : [595.28, 841.89];
-    await appendPaymentPage(out, payment, size);
+  if (payment && copied.length > 0) {
+    await drawPaymentQrOnPage(copied[0], out, payment);
   }
 
   return out.save();
